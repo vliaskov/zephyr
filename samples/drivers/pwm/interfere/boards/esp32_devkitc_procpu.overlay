@@ -1,0 +1,39 @@
+/*
+ * Two LEDC channels on two DIFFERENT timers:
+ *   channel 0 -> timer 0 -> GPIO4  ("slow", 1 Hz)
+ *   channel 1 -> timer 1 -> GPIO5  ("interfering" signal)
+ *
+ * NOTE: copy the exact pinmux macro style from
+ * tests/drivers/pwm/pwm_api/boards/esp32_devkitc_procpu.overlay in your tree.
+ * Check the macro names exist with:
+ *   grep -rn "LEDC_CH[01]_GPIO[45]" zephyr/include/zephyr/dt-bindings/pinctrl/
+ */
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+&pinctrl {
+	ledc0_default: ledc0_default {
+		group1 {
+			pinmux = <LEDC_CH0_GPIO4>,
+				 <LEDC_CH1_GPIO5>;
+			output-enable;
+		};
+	};
+};
+
+&ledc0 {
+	pinctrl-0 = <&ledc0_default>;
+	pinctrl-names = "default";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	channel0@0 {
+		reg = <0x0>;
+		timer = <0>;
+	};
+
+	channel1@1 {
+		reg = <0x1>;
+		timer = <1>;
+	};
+};
