@@ -72,9 +72,8 @@ int IRAM_ATTR esp_appcpu_image_load(unsigned int hdr_offset, unsigned int *entry
 	const uint8_t fa_id = PARTITION_ID(slot0_appcpu_partition);
 
 	if (entry_addr == NULL) {
-		ESP_EARLY_LOGE(TAG, "Can't return the entry address. Aborting!");
-		abort();
-		return -1;
+		ESP_EARLY_LOGE(TAG, "Can't return the entry address.");
+		return -EINVAL;
 	}
 
 	uint32_t mcuboot_header[8] = {0};
@@ -94,28 +93,28 @@ int IRAM_ATTR esp_appcpu_image_load(unsigned int hdr_offset, unsigned int *entry
 			fa_id, fa_offset, hdr_offset, fa_size / 1024);
 	} else if ((image_header.header_magic & 0xff) == 0xE9) {
 		ESP_EARLY_LOGE(TAG, "ESP image format is not supported");
-		abort();
+		return -ENOEXEC;
 	} else {
-		ESP_EARLY_LOGE(TAG, "Unknown or empty image detected. Aborting!");
-		abort();
+		ESP_EARLY_LOGE(TAG, "Unknown or empty image detected.");
+		return -ENOEXEC;
 	}
 
 	if (!esp_ptr_in_iram((void *)image_header.iram_dest_addr) ||
 	    !esp_ptr_in_iram((void *)(image_header.iram_dest_addr + image_header.iram_size))) {
-		ESP_EARLY_LOGE(TAG, "IRAM region in load header is not valid. Aborting");
-		abort();
+		ESP_EARLY_LOGE(TAG, "IRAM region in load header is not valid.");
+		return -ENOEXEC;
 	}
 
 	if (!esp_ptr_in_dram((void *)image_header.dram_dest_addr) ||
 	    !esp_ptr_in_dram((void *)(image_header.dram_dest_addr + image_header.dram_size))) {
-		ESP_EARLY_LOGE(TAG, "DRAM region in load header is not valid. Aborting");
-		abort();
+		ESP_EARLY_LOGE(TAG, "DRAM region in load header is not valid.");
+		return -ENOEXEC;
 	}
 
 	if (!esp_ptr_in_iram((void *)image_header.entry_addr)) {
-		ESP_EARLY_LOGE(TAG, "Application entry point (%xh) is not in IRAM. Aborting",
+		ESP_EARLY_LOGE(TAG, "Application entry point (%xh) is not in IRAM.",
 			   image_header.entry_addr);
-		abort();
+		return -ENOEXEC;
 	}
 
 	ESP_EARLY_LOGI(TAG, "IRAM segment: paddr=%08xh, vaddr=%08xh, size=%05xh (%6d) load",
@@ -169,6 +168,7 @@ void esp_appcpu_image_start(unsigned int hdr_offset)
 {
 	static int started;
 	unsigned int entry_addr = 0;
+	int result;
 
 	if (started) {
 		printk("APPCPU already started.\r\n");
@@ -176,7 +176,11 @@ void esp_appcpu_image_start(unsigned int hdr_offset)
 	}
 
 	/* Input image meta header, output appcpu entry point */
-	esp_appcpu_image_load(hdr_offset, &entry_addr);
+	result = esp_appcpu_image_load(hdr_offset, &entry_addr);
+	if (result != 0) {
+		printk("APPCPU image not valid (%d). APPCPU not started.\r\n", result);
+		return;
+	}
 
 	esp_appcpu_start((void *)entry_addr);
 }
