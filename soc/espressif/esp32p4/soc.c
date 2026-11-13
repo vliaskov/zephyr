@@ -25,6 +25,7 @@
 #include <psram.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/cache.h>
+#include <zephyr/drivers/pm_cpu_ops.h>   /* verify the header name in your tree */
 
 #if defined(CONFIG_NOCACHE_MEMORY)
 #include <zephyr/linker/linker-defs.h>
@@ -153,4 +154,46 @@ int IRAM_ATTR arch_printk_char_out(int c)
 void sys_arch_reboot(int type)
 {
 	esp_restart();
+}
+
+/* Entry stub in soc/espressif/esp32p4/start_core1.S (Variant 1 only) */
+extern void __esp32p4_core1_start(void);
+
+int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
+{
+	/* Variant 1: boot core 1 at our own stub and ignore entry_point
+	 * (generic code passes &__start, which is core 0's boot path).
+	 * Variant 2: use entry_point directly and have start.S branch
+	 * non-boot harts to the secondary path.
+	 */
+	uintptr_t boot_addr = (uintptr_t)&__esp32p4_core1_start;
+
+	ARG_UNUSED(entry_point);
+
+	if (cpuid != 1U) {
+		return -EINVAL;
+	}
+
+	/* hart id of this cpu, from the devicetree cpu@N reg */
+	unsigned long hartid = _kernel.cpus[cpuid].arch.hartid;
+
+	ARG_UNUSED(hartid);
+
+	/* TODO (take the sequence from hal_espressif / the P4 TRM):
+	 *  1. enable core 1 clock gate
+	 *  2. assert core 1 reset (or stall), so a warm reset can't leave it
+	 *     running stale code
+	 *  3. program core 1 boot address = boot_addr
+	 *  4. release core 1 from reset / stall
+	 * Return a negative errno if any step fails.
+	 */
+	ARG_UNUSED(boot_addr);
+
+	return 0;
+}
+
+int pm_cpu_off(void)
+{
+	/* Core 1 is never powered down in the SMP bring-up. */
+	return -ENOTSUP;
 }
