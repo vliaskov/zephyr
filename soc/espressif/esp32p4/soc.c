@@ -187,8 +187,23 @@ int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 	 *  4. release core 1 from reset / stall
 	 * Return a negative errno if any step fails.
 	 */
-	ARG_UNUSED(boot_addr);
+	//ARG_UNUSED(boot_addr);
+#if !defined(CONFIG_SOC_ESP32P4_REV_1_3) // !defined(CONFIG_ESP32P4_SELECTS_REV_LESS_V3)   // verify the Zephyr-side symbol 
+	REG_SET_BIT(HP_SYS_CLKRST_CPU_WAITI_CTRL0_REG,
+		    HP_SYS_CLKRST_REG_CORE1_WAITI_ICG_EN);
+#endif
+	esp_cpu_unstall(1);
+	//cpu_utility_ll_enable_clock_and_reset_app_cpu();
+	//cpu_utility_ll_enable_clock_and_reset_app_cpu_int_matrix();
 
+	if (!REG_GET_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG,
+			 HP_SYS_CLKRST_REG_CORE1_CPU_CLK_EN)) {
+		REG_SET_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG,
+			    HP_SYS_CLKRST_REG_CORE1_CPU_CLK_EN);
+	}
+
+	ets_set_appcpu_boot_addr((uint32_t)boot_addr);   /* ROM then jumps core 1 here */
+	//warm reset pulse if core1 already running? TODO
 	return 0;
 }
 
@@ -197,3 +212,34 @@ int pm_cpu_off(void)
 	/* Core 1 is never powered down in the SMP bring-up. */
 	return -ENOTSUP;
 }
+
+#ifdef CONFIG_SOC_PER_CORE_INIT_HOOK
+void soc_per_core_init_hook(void)
+{
+
+	esp_rom_install_uart_printf();
+	esp_rom_output_set_as_console(0);
+	esp_rom_printf("core1: per-core init\n");
+
+	//copied from arch/riscv/custom/andes/ //pma_init_per_core();
+#if defined(CONFIG_NOCACHE_MEMORY)
+	nocache_region_init();          /* PMA is per hart (verify) */
+#endif
+	//copied from components/esp_system/port/cpu_start.c
+#if SOC_BRANCH_PREDICTOR_SUPPORTED
+	esp_cpu_branch_prediction_enable();
+#endif  //#if SOC_BRANCH_PREDICTOR_SUPPORTED
+
+#if SOC_CPU_SUPPORT_WFE
+	rv_utils_disable_wfe_mode();
+#endif
+	//bootloader_init_mem();
+
+	//cpu_utility_ll_enable_debug(1);
+	//cpu_utility_ll_enable_record(1);
+
+	ets_set_appcpu_boot_addr(0);
+	// Clear interrupt matrix for APP CPU core
+	core_intr_matrix_clear();
+}
+#endif /* CONFIG_SOC_PER_CORE_INIT_HOOK */
