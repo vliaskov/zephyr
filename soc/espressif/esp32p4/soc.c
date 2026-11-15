@@ -159,6 +159,9 @@ void sys_arch_reboot(int type)
 /* Entry stub in soc/espressif/esp32p4/start_core1.S (Variant 1 only) */
 extern void __esp32p4_core1_start(void);
 
+
+
+#ifdef CONFIG_SMP
 int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 {
 	/* Variant 1: boot core 1 at our own stub and ignore entry_point
@@ -212,6 +215,16 @@ int pm_cpu_off(void)
 	/* Core 1 is never powered down in the SMP bring-up. */
 	return -ENOTSUP;
 }
+
+void arch_sched_directed_ipi(uint32_t cpu_bitmap)
+{
+	ARG_UNUSED(cpu_bitmap);
+	/* TODO (phase 3): raise the P4 cross-core interrupt for each CPU in
+	 * cpu_bitmap (CPU_INT_FROM_CPU_n), and register the receiving ISR so
+	 * it calls z_sched_ipi(). */
+}
+
+#endif
 
 #ifdef CONFIG_SOC_PER_CORE_INIT_HOOK
 void soc_per_core_init_hook(void)

@@ -24,6 +24,7 @@ if(CONFIG_SOC_ESP32P4_HPCORE)
   zephyr_library_sources_ifdef(CONFIG_POWEROFF ../common/poweroff.c)
   zephyr_sources_ifdef(CONFIG_ESP32_ULP_COPROC_ENABLED hpcore_init_ulp.c)
   zephyr_sources_ifdef(CONFIG_RISCV_PMP pmp_regions.c)
+  zephyr_library_sources_ifdef(CONFIG_SMP start_core1.S)
 endif()
 
 zephyr_sources_ifdef(CONFIG_SMP
