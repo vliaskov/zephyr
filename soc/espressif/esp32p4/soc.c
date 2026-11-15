@@ -27,6 +27,9 @@
 #include <zephyr/cache.h>
 #include <zephyr/drivers/pm_cpu_ops.h>   /* verify the header name in your tree */
 
+#include <esp_cpu.h>
+#include <soc/hp_sys_clkrst_reg.h>
+
 #if defined(CONFIG_NOCACHE_MEMORY)
 #include <zephyr/linker/linker-defs.h>
 #include <zephyr/sys/util.h>
@@ -222,6 +225,19 @@ void arch_sched_directed_ipi(uint32_t cpu_bitmap)
 	/* TODO (phase 3): raise the P4 cross-core interrupt for each CPU in
 	 * cpu_bitmap (CPU_INT_FROM_CPU_n), and register the receiving ISR so
 	 * it calls z_sched_ipi(). */
+}
+
+int arch_smp_init(void)
+{
+	/* TODO (phase 3): allocate/enable the CPU_INT_FROM_CPU_n interrupt
+	 * and register the ISR that calls z_sched_ipi(). Runs on core 0
+	 * after PRE_KERNEL_1 device init (see z_cstart()). */
+	return 0;
+}
+
+void smp_timer_init(void)
+{
+	/* TODO: per-CPU timer setup for core 1, if needed. */
 }
 
 #endif

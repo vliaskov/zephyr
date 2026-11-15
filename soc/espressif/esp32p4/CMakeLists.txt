@@ -26,8 +26,3 @@ if(CONFIG_SOC_ESP32P4_HPCORE)
   zephyr_sources_ifdef(CONFIG_RISCV_PMP pmp_regions.c)
   zephyr_library_sources_ifdef(CONFIG_SMP start_core1.S)
 endif()
-
-zephyr_sources_ifdef(CONFIG_SMP
-  esp32p4-mp.c
-  )
-

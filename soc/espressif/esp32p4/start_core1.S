@@ -5,15 +5,18 @@
 #include <soc/soc_caps.h>
 #include <zephyr/toolchain.h>
 #include <zephyr/linker/sections.h>
+#include <zephyr/arch/cpu.h>
+#include <zephyr/arch/riscv/irq.h>
 
-GTEXT(esp32p4_core1_start)
+//#include "asm_macros.inc"
+
+#define CSR_MTVT 0x307
+
 GTEXT(arch_secondary_cpu_init)
 GDATA(riscv_cpu_sp)
 GDATA(riscv_cpu_boot_flag)
 
-GTEXT(start_riscv)
 GTEXT(_vector_table)
-GDATA(z_interrupt_stacks)
 #if SOC_INT_CLIC_SUPPORTED
 GTEXT(_mtvt_table)
 #endif
@@ -21,13 +24,11 @@ GTEXT(_mtvt_table)
 /* Must live in memory core 1 can fetch from with caches in an unknown
  * state (HP SRAM / IRAM). Use the same section start.S uses, or an
  * IRAM section your default.ld defines. */
-//SECTION_FUNC(<sram_text_section>, __esp32p4_core1_start)
-GTEXT(__esp32p4_core1_start)
 	.section .iram1, "ax"
 	.balign 4
 	.global __esp32p4_core1_start
 	.type __esp32p4_core1_start, @function
-	//.type __start, @function
+__esp32p4_core1_start:
 #ifdef CONFIG_RISCV_GP
 	/* Must precede any access the linker could relax to gp-relative. */
 	.option push
@@ -68,4 +69,6 @@ GTEXT(__esp32p4_core1_start)
 	li t1, 1
 	sw t1, 0x00(t0)
 
-	j arch_secondary_cpu_init
+	tail arch_secondary_cpu_init
+
+	.size __esp32p4_core1_start, . - __esp32p4_core1_start
