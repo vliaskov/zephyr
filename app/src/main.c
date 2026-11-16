@@ -8,7 +8,8 @@ static void fn(void *a, void *b, void *c)
 {
 	for (;;) {
 		printk("thread on cpu %d\n", arch_curr_cpu()->id);
-		k_msleep(500);
+		k_busy_wait(500 * 1000);
+		//k_msleep(500);
 	}
 }
 

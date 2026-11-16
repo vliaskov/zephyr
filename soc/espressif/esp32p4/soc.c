@@ -165,8 +165,13 @@ extern void __esp32p4_core1_start(void);
 
 
 #ifdef CONFIG_SMP
+extern volatile uintptr_t riscv_cpu_boot_flag;
+
 int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 {
+
+	esp_rom_printf("pm_cpu_on cpu=%lu stub=%p\n", cpuid, __esp32p4_core1_start);
+
 	/* Variant 1: boot core 1 at our own stub and ignore entry_point
 	 * (generic code passes &__start, which is core 0's boot path).
 	 * Variant 2: use entry_point directly and have start.S branch
@@ -180,36 +185,41 @@ int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 		return -EINVAL;
 	}
 
-	/* hart id of this cpu, from the devicetree cpu@N reg */
-	unsigned long hartid = _kernel.cpus[cpuid].arch.hartid;
-
-	ARG_UNUSED(hartid);
-
-	/* TODO (take the sequence from hal_espressif / the P4 TRM):
-	 *  1. enable core 1 clock gate
-	 *  2. assert core 1 reset (or stall), so a warm reset can't leave it
-	 *     running stale code
-	 *  3. program core 1 boot address = boot_addr
-	 *  4. release core 1 from reset / stall
-	 * Return a negative errno if any step fails.
-	 */
-	//ARG_UNUSED(boot_addr);
-#if !defined(CONFIG_SOC_ESP32P4_REV_1_3) // !defined(CONFIG_ESP32P4_SELECTS_REV_LESS_V3)   // verify the Zephyr-side symbol 
+	#if !defined(CONFIG_SOC_ESP32P4_REV_1_3)
+	/* v3+ only: re-enable core 1 auto clock gating (IDF start_other_core()).
+	 * Unverified that this register/bit exists in this HAL; it is compiled
+	 * out on your v1.3 board. */
 	REG_SET_BIT(HP_SYS_CLKRST_CPU_WAITI_CTRL0_REG,
 		    HP_SYS_CLKRST_REG_CORE1_WAITI_ICG_EN);
 #endif
+
+	/* 1. clock on */
+	REG_SET_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG,
+		    HP_SYS_CLKRST_REG_CORE1_CPU_CLK_EN);
+
+	/* 2. put core 1 in reset: also forces a clean restart if it was
+	 *    already running (warm reset case) */
+	REG_SET_BIT(HP_SYS_CLKRST_HP_RST_EN0_REG,
+		    HP_SYS_CLKRST_REG_RST_EN_CORE1_GLOBAL);
+
+	/* 3. unstall and set the boot address while core 1 is in reset */
 	esp_cpu_unstall(1);
-	//cpu_utility_ll_enable_clock_and_reset_app_cpu();
-	//cpu_utility_ll_enable_clock_and_reset_app_cpu_int_matrix();
+	ets_set_appcpu_boot_addr((uint32_t)(uintptr_t) boot_addr);
 
-	if (!REG_GET_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG,
-			 HP_SYS_CLKRST_REG_CORE1_CPU_CLK_EN)) {
-		REG_SET_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG,
-			    HP_SYS_CLKRST_REG_CORE1_CPU_CLK_EN);
-	}
+	k_busy_wait(10);
 
-	ets_set_appcpu_boot_addr((uint32_t)boot_addr);   /* ROM then jumps core 1 here */
-	//warm reset pulse if core1 already running? TODO
+	/* 4. release reset: core 1's ROM now starts with the address in place */
+	REG_CLR_BIT(HP_SYS_CLKRST_HP_RST_EN0_REG,
+		    HP_SYS_CLKRST_REG_RST_EN_CORE1_GLOBAL);
+
+	//esp_rom_printf("boot_flag=%lu after wait\n", (unsigned long)riscv_cpu_boot_flag);
+	/*esp_rom_printf("released: clk=%08x rst=%08x\n",
+		       REG_READ(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG),
+		       REG_READ(HP_SYS_CLKRST_HP_RST_EN0_REG));
+
+	for (int i = 0; i < 2000 && !riscv_cpu_boot_flag; i++) {
+		esp_rom_delay_us(100);
+	}*/
 	return 0;
 }
 
