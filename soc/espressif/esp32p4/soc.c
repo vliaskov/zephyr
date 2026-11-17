@@ -61,6 +61,27 @@ BUILD_ASSERT(ESP32P4_CPU_FREQ_VALID(DT_PROP(DT_PATH(cpus, cpu_0), clock_frequenc
 BUILD_ASSERT(ESP32P4_CPU_FREQ_VALID(DT_PROP(DT_PATH(cpus, cpu_1), clock_frequency)),
 	     ESP32P4_CPU_FREQ_MSG);
 
+#ifdef CONFIG_SMP
+#include <zephyr/drivers/interrupt_controller/intc_esp32.h>
+#include <soc/hp_system_reg.h>
+#include <ipi.h>
+#include <ksched.h>
+/* + whatever soc/cdns/swerv/s420/ipi.c includes for z_sched_ipi() */
+
+BUILD_ASSERT(CONFIG_MP_MAX_NUM_CPUS <= 2, "FROM_CPU_0/1 cover two harts");
+
+enum { IPI_SCHED = 0 };
+static atomic_t cpu_pending_ipi[CONFIG_MP_MAX_NUM_CPUS];
+
+static const uintptr_t ipi_reg[] = {
+	HP_SYSTEM_CPU_INT_FROM_CPU_0_REG,
+	HP_SYSTEM_CPU_INT_FROM_CPU_1_REG,
+};
+
+static inline void ipi_raise(unsigned int hart) { REG_WRITE(ipi_reg[hart], BIT(0)); }
+static inline void ipi_clear(unsigned int hart) { REG_WRITE(ipi_reg[hart], 0); }  /* verify */
+#endif
+
 #if defined(CONFIG_NOCACHE_MEMORY)
 void nocache_region_init(void)
 {
@@ -185,7 +206,7 @@ int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 		return -EINVAL;
 	}
 
-	#if !defined(CONFIG_SOC_ESP32P4_REV_1_3)
+#if !defined(CONFIG_SOC_ESP32P4_REV_1_3)
 	/* v3+ only: re-enable core 1 auto clock gating (IDF start_other_core()).
 	 * Unverified that this register/bit exists in this HAL; it is compiled
 	 * out on your v1.3 board. */
@@ -235,19 +256,66 @@ void arch_sched_directed_ipi(uint32_t cpu_bitmap)
 	/* TODO (phase 3): raise the P4 cross-core interrupt for each CPU in
 	 * cpu_bitmap (CPU_INT_FROM_CPU_n), and register the receiving ISR so
 	 * it calls z_sched_ipi(). */
+	unsigned int key = arch_irq_lock();
+	unsigned int id = _current_cpu->id;
+	unsigned int num_cpus = arch_num_cpus();
+
+	for (unsigned int i = 0; i < num_cpus; i++) {
+		if ((i != id) && _kernel.cpus[i].arch.online && ((cpu_bitmap & BIT(i)) != 0)) {
+			atomic_set_bit(&cpu_pending_ipi[i], IPI_SCHED);
+			ipi_raise(_kernel.cpus[i].arch.hartid);
+			//MSIP(_kernel.cpus[i].arch.hartid) = 1;
+		}
+	}
+
+	arch_irq_unlock(key);
 }
 
-int arch_smp_init(void)
+static void sched_ipi_handler(void *unused)
+{
+	ARG_UNUSED(unused);
+
+	ipi_clear(csr_read(mhartid));  /*clear pending interrupt first */
+	atomic_val_t pending_ipi = atomic_clear(&cpu_pending_ipi[_current_cpu->id]);
+
+	if (pending_ipi & ATOMIC_MASK(IPI_SCHED)) {
+		z_sched_ipi();
+	}
+}
+
+/* Must run on the core that will receive the interrupt */
+static void ipi_init_this_cpu(void)
 {
 	/* TODO (phase 3): allocate/enable the CPU_INT_FROM_CPU_n interrupt
 	 * and register the ISR that calls z_sched_ipi(). Runs on core 0
 	 * after PRE_KERNEL_1 device init (see z_cstart()). */
-	return 0;
+
+	esp_rom_printf("ipi alloc cpu%d: before\n", (int)csr_read(mhartid));
+	/* ETS_FROM_CPU_INTR0..3 look consecutive in soc/interrupts.h, so
+	 * source = INTR0 + cpu id. ESP_INTR_FLAG_* / handle args: verify. */
+	int ret = esp_intr_alloc(ETS_FROM_CPU_INTR0_SOURCE + csr_read(mhartid),
+		0, /*let the driver pick a level, no flag yet*/
+		sched_ipi_handler, NULL, NULL);
+	esp_rom_printf("ipi alloc cpu%d: ret=%d\n", (int)csr_read(mhartid), ret);
+	if (ret != 0) {
+		esp_rom_printf("ipi: esp_intr_alloc failed %d\n", ret);
+	}
 }
+
+int arch_smp_init(void)
+{ 
+	ipi_init_this_cpu();
+	return 0;
+}   /* core 0 */
+/* and call ipi_init_this_cpu() from soc_per_core_init_hook() for core 1 */
 
 void smp_timer_init(void)
 {
-	/* TODO: per-CPU timer setup for core 1, if needed. */
+#ifdef CONFIG_SMP
+	/* now the core1 context is ready, as this is called from smp_init_top,
+	 * after dummy thread has been created */
+	ipi_init_this_cpu();
+#endif
 }
 
 #endif
@@ -255,6 +323,9 @@ void smp_timer_init(void)
 #ifdef CONFIG_SOC_PER_CORE_INIT_HOOK
 void soc_per_core_init_hook(void)
 {
+	if (csr_read(mhartid) == 0) {
+		return;       /* core 0 has its own init path */
+	}
 
 	esp_rom_install_uart_printf();
 	esp_rom_output_set_as_console(0);
@@ -272,13 +343,11 @@ void soc_per_core_init_hook(void)
 #if SOC_CPU_SUPPORT_WFE
 	rv_utils_disable_wfe_mode();
 #endif
-	//bootloader_init_mem();
-
-	//cpu_utility_ll_enable_debug(1);
-	//cpu_utility_ll_enable_record(1);
 
 	ets_set_appcpu_boot_addr(0);
 	// Clear interrupt matrix for APP CPU core
 	core_intr_matrix_clear();
+	//Do not call ipi_init_this_cpu() here, core1 context is not ready yet.
+
 }
 #endif /* CONFIG_SOC_PER_CORE_INIT_HOOK */
