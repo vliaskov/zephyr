@@ -346,7 +346,6 @@ void soc_per_core_init_hook(void)
 
 	ets_set_appcpu_boot_addr(0);
 	// Clear interrupt matrix for APP CPU core
-	core_intr_matrix_clear();
 	//Do not call ipi_init_this_cpu() here, core1 context is not ready yet.
 
 }
