@@ -81,6 +81,4 @@ config MULTITHREADING
 config NUM_PREEMPT_PRIORITIES
 	default 0
 
-config MP_MAX_NUM_CPUS
-	default 2 if SMP        # verify: may already be derived from DT
 endif
