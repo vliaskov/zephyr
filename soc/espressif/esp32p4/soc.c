@@ -225,8 +225,6 @@ int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 	esp_cpu_unstall(1);
 	ets_set_appcpu_boot_addr((uint32_t)(uintptr_t) boot_addr);
 
-	k_busy_wait(10);
-
 	/* 4. release reset: core 1's ROM now starts with the address in place */
 	REG_CLR_BIT(HP_SYS_CLKRST_HP_RST_EN0_REG,
 		    HP_SYS_CLKRST_REG_RST_EN_CORE1_GLOBAL);
@@ -282,7 +280,8 @@ static void ipi_init_this_cpu(void)
 		sched_ipi_handler, NULL, NULL);
 
 	if (ret != 0) {
-		LOG_ERR("CPU%lu: could not allocate IPI interrupt (%d)",
+		__ASSERT(ret == 0,
+			"CPU%lu: could not allocate IPI interrupt (%d)",
 			(unsigned long)csr_read(mhartid), ret);
 	}
 }
