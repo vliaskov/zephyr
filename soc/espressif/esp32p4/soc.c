@@ -191,8 +191,6 @@ extern volatile uintptr_t riscv_cpu_boot_flag;
 int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 {
 
-	esp_rom_printf("pm_cpu_on cpu=%lu stub=%p\n", cpuid, __esp32p4_core1_start);
-
 	/* Variant 1: boot core 1 at our own stub and ignore entry_point
 	 * (generic code passes &__start, which is core 0's boot path).
 	 * Variant 2: use entry_point directly and have start.S branch
@@ -233,14 +231,6 @@ int pm_cpu_on(unsigned long cpuid, uintptr_t entry_point)
 	REG_CLR_BIT(HP_SYS_CLKRST_HP_RST_EN0_REG,
 		    HP_SYS_CLKRST_REG_RST_EN_CORE1_GLOBAL);
 
-	//esp_rom_printf("boot_flag=%lu after wait\n", (unsigned long)riscv_cpu_boot_flag);
-	/*esp_rom_printf("released: clk=%08x rst=%08x\n",
-		       REG_READ(HP_SYS_CLKRST_SOC_CLK_CTRL0_REG),
-		       REG_READ(HP_SYS_CLKRST_HP_RST_EN0_REG));
-
-	for (int i = 0; i < 2000 && !riscv_cpu_boot_flag; i++) {
-		esp_rom_delay_us(100);
-	}*/
 	return 0;
 }
 
@@ -253,9 +243,6 @@ int pm_cpu_off(void)
 void arch_sched_directed_ipi(uint32_t cpu_bitmap)
 {
 	ARG_UNUSED(cpu_bitmap);
-	/* TODO (phase 3): raise the P4 cross-core interrupt for each CPU in
-	 * cpu_bitmap (CPU_INT_FROM_CPU_n), and register the receiving ISR so
-	 * it calls z_sched_ipi(). */
 	unsigned int key = arch_irq_lock();
 	unsigned int id = _current_cpu->id;
 	unsigned int num_cpus = arch_num_cpus();
@@ -264,7 +251,6 @@ void arch_sched_directed_ipi(uint32_t cpu_bitmap)
 		if ((i != id) && _kernel.cpus[i].arch.online && ((cpu_bitmap & BIT(i)) != 0)) {
 			atomic_set_bit(&cpu_pending_ipi[i], IPI_SCHED);
 			ipi_raise(_kernel.cpus[i].arch.hartid);
-			//MSIP(_kernel.cpus[i].arch.hartid) = 1;
 		}
 	}
 
@@ -286,19 +272,18 @@ static void sched_ipi_handler(void *unused)
 /* Must run on the core that will receive the interrupt */
 static void ipi_init_this_cpu(void)
 {
-	/* TODO (phase 3): allocate/enable the CPU_INT_FROM_CPU_n interrupt
-	 * and register the ISR that calls z_sched_ipi(). Runs on core 0
-	 * after PRE_KERNEL_1 device init (see z_cstart()). */
-
-	esp_rom_printf("ipi alloc cpu%d: before\n", (int)csr_read(mhartid));
-	/* ETS_FROM_CPU_INTR0..3 look consecutive in soc/interrupts.h, so
-	 * source = INTR0 + cpu id. ESP_INTR_FLAG_* / handle args: verify. */
+	/*
+	 * Each CPU listens to its own FROM_CPU source, so that
+	 * arch_sched_directed_ipi() can target one CPU. Interrupt sources
+	 * ETS_FROM_CPU_INTR0 and INTR1 are consecutive.
+	 */
 	int ret = esp_intr_alloc(ETS_FROM_CPU_INTR0_SOURCE + csr_read(mhartid),
 		0, /*let the driver pick a level, no flag yet*/
 		sched_ipi_handler, NULL, NULL);
-	esp_rom_printf("ipi alloc cpu%d: ret=%d\n", (int)csr_read(mhartid), ret);
+
 	if (ret != 0) {
-		esp_rom_printf("ipi: esp_intr_alloc failed %d\n", ret);
+		LOG_ERR("CPU%lu: could not allocate IPI interrupt (%d)",
+			(unsigned long)csr_read(mhartid), ret);
 	}
 }
 
@@ -327,26 +312,17 @@ void soc_per_core_init_hook(void)
 		return;       /* core 0 has its own init path */
 	}
 
-	esp_rom_install_uart_printf();
-	esp_rom_output_set_as_console(0);
-	esp_rom_printf("core1: per-core init\n");
-
-	//copied from arch/riscv/custom/andes/ //pma_init_per_core();
 #if defined(CONFIG_NOCACHE_MEMORY)
 	nocache_region_init();          /* PMA is per hart (verify) */
 #endif
-	//copied from components/esp_system/port/cpu_start.c
 #if SOC_BRANCH_PREDICTOR_SUPPORTED
 	esp_cpu_branch_prediction_enable();
-#endif  //#if SOC_BRANCH_PREDICTOR_SUPPORTED
+#endif
 
 #if SOC_CPU_SUPPORT_WFE
 	rv_utils_disable_wfe_mode();
 #endif
 
 	ets_set_appcpu_boot_addr(0);
-	// Clear interrupt matrix for APP CPU core
-	//Do not call ipi_init_this_cpu() here, core1 context is not ready yet.
-
 }
 #endif /* CONFIG_SOC_PER_CORE_INIT_HOOK */
